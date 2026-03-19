@@ -1,22 +1,21 @@
 name: Virtual Library ETL Pipeline
 
-# This tells GitHub WHEN to run the scripts.
-# The Harvester runs at 1:00 AM UTC, the Extractor runs at 1:30 AM UTC.
 on:
   schedule:
-    - cron: '0 1 * * *'   # Harvester
-    - cron: '30 1 * * *'  # Extractor
-  workflow_dispatch:      # This adds a "Run Now" button so you can test it manually!
+    # In production, they are scheduled 30 mins apart to ensure the queue is full
+    - cron: '0 1 * * *'   # Harvester runs at 1:00 AM
+    - cron: '30 1 * * *'  # Extractor runs at 1:30 AM
+  workflow_dispatch:      
 
 jobs:
   run-harvester:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # UPDATED TO CLEAR WARNING
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # UPDATED TO CLEAR WARNING
         with:
           python-version: '3.10'
 
@@ -26,7 +25,6 @@ jobs:
       - name: Install Playwright Browsers
         run: playwright install chromium
 
-      # This safely injects your secret JSON key into the server
       - name: Create GCP Key File
         run: echo '${{ secrets.GCP_CREDENTIALS }}' > gcp-key.json
 
@@ -34,15 +32,14 @@ jobs:
         run: python harvester.py
         
   run-extractor:
-    # This ensures the Extractor waits for the Harvester to finish!
-    needs: run-harvester
+    # THE "NEEDS" LINE HAS BEEN REMOVED FOR PARALLEL EXECUTION
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # UPDATED TO CLEAR WARNING
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # UPDATED TO CLEAR WARNING
         with:
           python-version: '3.10'
 
