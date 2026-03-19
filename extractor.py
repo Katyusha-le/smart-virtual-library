@@ -9,7 +9,6 @@ import os
 # 1. Authenticate with GCP and Groq
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "gcp-key.json"
 
-# Fetch the secret key injected by GitHub Actions
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise ValueError("CRITICAL ERROR: GROQ_API_KEY environment variable is missing!")
@@ -89,6 +88,9 @@ async def run_extractor_worker():
     print("  STARTING PHASE 2: EXTRACTOR WORKER (CONSUMER) ")
     print("==================================================")
     
+    max_empty_retries = 6  # 6 retries * 10 seconds = 60 seconds of waiting
+    empty_retries = 0
+
     while True:
         query = f"""
             WITH LatestStatus AS (
@@ -104,8 +106,17 @@ async def run_extractor_worker():
         results = list(query_job.result())
         
         if not results:
-            print("[WORKER] The queue is empty! All books processed. Shutting down.")
-            break
+            if empty_retries < max_empty_retries:
+                print(f"[WORKER] Queue empty. Waiting 10s for new links... (Attempt {empty_retries+1}/{max_empty_retries})")
+                await asyncio.sleep(10)
+                empty_retries += 1
+                continue
+            else:
+                print("[WORKER] Queue has been empty for 60 seconds. All books processed. Shutting down.")
+                break
+                
+        # If we found a link, reset the retry counter back to 0
+        empty_retries = 0
             
         target_url = results[0].url
         print(f"\n[WORKER] Picked up job from queue: {target_url}")
