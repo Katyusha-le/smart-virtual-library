@@ -40,13 +40,32 @@ class BookData(BaseModel):
     keywords: Optional[List[str]] = None
 
 # ---------------------------------------------------------
-# STATE MANAGEMENT (Replaces the old PENDING logic)
+# STATE MANAGEMENT (Free-Tier Append Method)
 # ---------------------------------------------------------
+def update_link_status(url, domain, status, new_retry_count=0):
+    """Appends a new status row instead of updating, bypassing DML limits."""
+    timestamp = datetime.now(timezone.utc).isoformat()
+    row = [{
+        "url": url,
+        "domain": domain,
+        "status": status,
+        "discovered_at": timestamp, 
+        "last_visited_at": timestamp,
+        "retry_count": new_retry_count
+    }]
+    bq_client.load_table_from_json(row, FRONTIER_TABLE).result()
+
 def get_unvisited_link():
-    """Finds one UNVISITED link and claims it using an IN_PROGRESS lock."""
+    """Finds the most recent status for each URL and grabs one UNVISITED link."""
     query = f"""
-        SELECT url, retry_count FROM `{FRONTIER_TABLE}`
-        WHERE status = 'UNVISITED' LIMIT 1
+        WITH LatestStatus AS (
+            SELECT url, domain, status, retry_count,
+            ROW_NUMBER() OVER(PARTITION BY url ORDER BY discovered_at DESC) as rn
+            FROM `{FRONTIER_TABLE}`
+        )
+        SELECT url, domain, retry_count FROM LatestStatus 
+        WHERE rn = 1 AND status = 'UNVISITED' 
+        LIMIT 1
     """
     results = list(bq_client.query(query).result())
     
@@ -54,23 +73,9 @@ def get_unvisited_link():
         return None
         
     row = results[0]
-    # Immediately lock it so no other bot tries to scrape it
-    update_query = f"""
-        UPDATE `{FRONTIER_TABLE}`
-        SET status = 'IN_PROGRESS', last_visited_at = CURRENT_TIMESTAMP()
-        WHERE url = '{row.url}'
-    """
-    bq_client.query(update_query).result()
+    # Immediately append an IN_PROGRESS row to lock it
+    update_link_status(row.url, row.domain, 'IN_PROGRESS', row.retry_count)
     return row
-
-def update_link_status(url, status, new_retry_count=0):
-    """Marks the task as VISITED or FAILED in the frontier table."""
-    query = f"""
-        UPDATE `{FRONTIER_TABLE}`
-        SET status = '{status}', retry_count = {new_retry_count}
-        WHERE url = '{url}'
-    """
-    bq_client.query(query).result()
 
 # ---------------------------------------------------------
 # CORE FUNCTIONS
@@ -81,11 +86,9 @@ async def scrape_dynamic_text(url):
         context = await browser.new_context(user_agent="Mozilla/5.0")
         page = await context.new_page()
         
-        # Adding a try-except to catch bad pages/timeouts instantly
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             
-            # Your custom scroll & expand logic
             for _ in range(3):
                 await page.mouse.wheel(0, 1500) 
                 await page.wait_for_timeout(1000) 
@@ -95,7 +98,6 @@ async def scrape_dynamic_text(url):
             except:
                 pass 
                 
-            # Strip out heavy scripts/images before extracting text to save tokens
             await page.evaluate("document.querySelectorAll('script, style, nav, footer, img').forEach(el => el.remove())")
             raw_text = await page.locator("body").inner_text()
             
@@ -160,10 +162,10 @@ async def run_extractor_worker():
                 print("[WORKER] Queue has been empty for 60 seconds. All books processed. Shutting down.")
                 break
                 
-        # If we found a link, reset the retry counter back to 0
         empty_retries = 0
             
         target_url = target.url
+        target_domain = target.domain
         retry_count = target.retry_count
         print(f"\n[WORKER] Picked up job from queue: {target_url}")
         
@@ -171,7 +173,7 @@ async def run_extractor_worker():
         
         if not raw_html_text:
             print("-> SKIPPED: Could not extract text from page.")
-            update_link_status(target_url, "FAILED", retry_count + 1)
+            update_link_status(target_url, target_domain, "FAILED", retry_count + 1)
             continue
             
         print("-> Text scraped. Sending to Llama 3.1...")
@@ -179,33 +181,31 @@ async def run_extractor_worker():
         
         try:
             raw_record = json.loads(clean_json_str)
-            
-            # The Bouncer Check: Make sure Llama returned the right schema
             clean_record = BookData(**raw_record)
             book_dict = clean_record.model_dump()
             
             if book_dict.get("title") is None:
                 print("-> SKIPPED: AI found no valid title. Marking as FAILED.")
-                update_link_status(target_url, 'FAILED', retry_count + 1)
+                update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
                 continue
                 
             try:
                 job = bq_client.load_table_from_json([book_dict], DESTINATION_TABLE)
                 job.result()
                 print("-> Successfully saved book to BigQuery library_database!")
-                update_link_status(target_url, 'VISITED', retry_count)
+                update_link_status(target_url, target_domain, 'VISITED', retry_count)
                 
             except Exception as e:
                 print(f"-> [!] Database Insert Error: {e}")
-                update_link_status(target_url, 'FAILED', retry_count + 1)
+                update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
                 
         except ValidationError as e:
             print(f"-> [!] Pydantic rejected the AI's data format. Marking as FAILED.")
-            update_link_status(target_url, 'FAILED', retry_count + 1)
+            update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
             
         except json.JSONDecodeError:
             print("-> [!] JSON Error from Groq. Marking as FAILED in queue.")
-            update_link_status(target_url, 'FAILED', retry_count + 1)
+            update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
 
         print("-> Pausing 2 seconds for API limits...")
         await asyncio.sleep(2)
