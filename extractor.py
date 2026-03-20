@@ -42,22 +42,24 @@ class BookData(BaseModel):
     keywords: Optional[List[str]] = None
 
 # ---------------------------------------------------------
-# STATE MANAGEMENT (Instant Streaming API)
+# STATE MANAGEMENT (Free-Tier Load Job)
 # ---------------------------------------------------------
 def update_link_status(url, domain, status, new_retry_count=0):
-    """Uses the instant insert_rows_json API to avoid background load delays."""
+    """Uses the Free-Tier compatible Load Job API."""
     timestamp = datetime.now(timezone.utc).isoformat()
-    row = {
+    row = [{
         "url": url,
         "domain": domain,
         "status": status,
         "discovered_at": timestamp, 
         "last_visited_at": timestamp,
         "retry_count": new_retry_count
-    }
-    errors = bq_client.insert_rows_json(FRONTIER_TABLE, [row])
-    if errors:
-        print(f"      [!] BigQuery State Update Error: {errors}")
+    }]
+    try:
+        job = bq_client.load_table_from_json(row, FRONTIER_TABLE)
+        job.result()
+    except Exception as e:
+        print(f"      [!] BigQuery State Update Error: {e}")
 
 def get_batch_unvisited_links(limit=50):
     """Fetches a batch of UNVISITED links at once to avoid constant DB querying."""
@@ -206,15 +208,12 @@ async def run_extractor_worker():
                     continue
                     
                 try:
-                    # Use instant API for the final database too
-                    errors = bq_client.insert_rows_json(DESTINATION_TABLE, [book_dict])
-                    if errors:
-                        print(f"-> [!] BigQuery Insert Error: {errors}")
-                        update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
-                    else:
-                        print("-> Successfully saved book to BigQuery library_database!")
-                        update_link_status(target_url, target_domain, 'VISITED', retry_count)
-                    
+                    # Use Free-Tier compatible API for the final database too
+                    job = bq_client.load_table_from_json([book_dict], DESTINATION_TABLE)
+                    job.result()
+                    print("-> Successfully saved book to BigQuery library_database!")
+                    update_link_status(target_url, target_domain, 'VISITED', retry_count)
+                
                 except Exception as e:
                     print(f"-> [!] Database Insert Error: {e}")
                     update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
