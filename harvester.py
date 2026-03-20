@@ -53,8 +53,13 @@ async def run_discovery():
             for seed_url in site_data["seed_urls"]:
                 print(f" -> Visiting seed: {seed_url}")
                 try:
-                    # 1. Wait until the network is mostly quiet, not just the HTML
                     await page.goto(seed_url, wait_until="domcontentloaded", timeout=60000)
+
+                    # 1. MOVED UP: Scroll immediately to wake up React's lazy loaders
+                    print(" -> Scrolling to trigger lazy loading...")
+                    for _ in range(3):
+                        await page.mouse.wheel(0, 1000)
+                        await page.wait_for_timeout(1000)
                     
                     # 2. Explicitly wait for the specific book selector to appear (max 15 seconds)
                     try:
