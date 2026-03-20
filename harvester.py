@@ -38,7 +38,17 @@ async def run_discovery():
             for seed_url in site_data["seed_urls"]:
                 print(f" -> Visiting seed: {seed_url}")
                 try:
-                    await page.goto(seed_url, wait_until="domcontentloaded", timeout=60000)
+                    # 1. Wait until the network is mostly quiet, not just the HTML
+                    await page.goto(seed_url, wait_until="networkidle", timeout=60000)
+                    
+                    # 2. Explicitly wait for the specific book selector to appear (max 15 seconds)
+                    try:
+                        print(f" -> Waiting for elements matching '{book_link_selector}' to load...")
+                        await page.wait_for_selector(book_link_selector, timeout=15000)
+                    except:
+                        # 3. DEBUGGER: If it times out, print the page title to see if we hit a CAPTCHA
+                        page_title = await page.title()
+                        print(f" -> [!] Timed out waiting for products. The bot is currently looking at a page titled: '{page_title}'")
                     
                     # Scroll to trigger lazy-loaded images/links
                     for _ in range(3):
