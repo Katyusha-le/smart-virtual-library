@@ -1,8 +1,10 @@
 import asyncio
 import json
 import os
+import random
 from datetime import datetime, timezone
 from playwright.async_api import async_playwright
+from playwright_stealth import stealth_async
 from google.cloud import bigquery
 from groq import Groq
 from pydantic import BaseModel, ValidationError
@@ -40,23 +42,25 @@ class BookData(BaseModel):
     keywords: Optional[List[str]] = None
 
 # ---------------------------------------------------------
-# STATE MANAGEMENT (Free-Tier Append Method)
+# STATE MANAGEMENT (Instant Streaming API)
 # ---------------------------------------------------------
 def update_link_status(url, domain, status, new_retry_count=0):
-    """Appends a new status row instead of updating, bypassing DML limits."""
+    """Uses the instant insert_rows_json API to avoid background load delays."""
     timestamp = datetime.now(timezone.utc).isoformat()
-    row = [{
+    row = {
         "url": url,
         "domain": domain,
         "status": status,
         "discovered_at": timestamp, 
         "last_visited_at": timestamp,
         "retry_count": new_retry_count
-    }]
-    bq_client.load_table_from_json(row, FRONTIER_TABLE).result()
+    }
+    errors = bq_client.insert_rows_json(FRONTIER_TABLE, [row])
+    if errors:
+        print(f"      [!] BigQuery State Update Error: {errors}")
 
-def get_unvisited_link():
-    """Finds the most recent status for each URL and grabs one UNVISITED link."""
+def get_batch_unvisited_links(limit=50):
+    """Fetches a batch of UNVISITED links at once to avoid constant DB querying."""
     query = f"""
         WITH LatestStatus AS (
             SELECT url, domain, status, retry_count,
@@ -65,26 +69,25 @@ def get_unvisited_link():
         )
         SELECT url, domain, retry_count FROM LatestStatus 
         WHERE rn = 1 AND status = 'UNVISITED' 
-        LIMIT 1
+        LIMIT {limit}
     """
-    results = list(bq_client.query(query).result())
-    
-    if not results:
-        return None
-        
-    row = results[0]
-    # Immediately append an IN_PROGRESS row to lock it
-    update_link_status(row.url, row.domain, 'IN_PROGRESS', row.retry_count)
-    return row
+    return list(bq_client.query(query).result())
 
 # ---------------------------------------------------------
-# CORE FUNCTIONS
+# CORE FUNCTIONS (Now with Stealth & Truncation)
 # ---------------------------------------------------------
 async def scrape_dynamic_text(url):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(user_agent="Mozilla/5.0")
+        
+        # 1. ADDED: User Agent Rotation & Stealth to bypass Fahasa Cloudflare
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        ]
+        context = await browser.new_context(user_agent=random.choice(user_agents))
         page = await context.new_page()
+        await stealth_async(page)
         
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
@@ -106,19 +109,23 @@ async def scrape_dynamic_text(url):
             raw_text = ""
             
         await browser.close()
-        return raw_text[:30000]
+        
+        # 2. REDUCED: Cut down to 15,000 chars to prevent Groq API Token crashes
+        return raw_text[:15000]
 
 def clean_data_with_ai(raw_text):
+    # 3. UPDATED PROMPT: Explicitly prevent massive overviews
     prompt = f"""
     You are an expert librarian data assistant. Extract the following information from the raw Vietnamese text and return ONLY a valid JSON object. 
     If a piece of information is missing, use null. Preserve all Vietnamese accents perfectly.
+    CRITICAL: Keep the 'overview' concise (maximum 3 sentences) to save space.
     
     Required JSON Schema:
     {{
       "title": "Book Title", "author": "Author Name", "publisher": "Publisher Name",
       "publish_date": "YYYY-MM-DD or MM/YYYY", "cover_type": "Hardcover or Paperback",
       "page_count": 300, "standard_price_vnd": 150000, "current_price_vnd": 120000,
-      "overview": "Summary...", "keywords": ["keyword1", "keyword2"]
+      "overview": "Short Summary...", "keywords": ["keyword1", "keyword2"]
     }}
     
     Raw text: {raw_text}
@@ -139,40 +146,36 @@ def clean_data_with_ai(raw_text):
         return "{}"
 
 # ---------------------------------------------------------
-# THE WORKER LOOP
+# THE WORKER LOOP (Batch Processing)
 # ---------------------------------------------------------
 async def run_extractor_worker():
     print("==================================================")
     print("  STARTING LAYER 3: EXTRACTOR WORKER (CONSUMER) ")
     print("==================================================")
     
-    max_empty_retries = 6  
-    empty_retries = 0
+    print("[WORKER] Fetching a batch of UNVISITED links...")
+    batch = get_batch_unvisited_links(limit=50)
+    
+    if not batch:
+        print("[WORKER] Queue is empty. No links found. Shutting down.")
+        return
 
-    while True:
-        target = get_unvisited_link()
-        
-        if not target:
-            if empty_retries < max_empty_retries:
-                print(f"[WORKER] Queue empty. Waiting 10s for new links... (Attempt {empty_retries+1}/{max_empty_retries})")
-                await asyncio.sleep(10)
-                empty_retries += 1
-                continue
-            else:
-                print("[WORKER] Queue has been empty for 60 seconds. All books processed. Shutting down.")
-                break
-                
-        empty_retries = 0
-            
+    print(f"[WORKER] Found {len(batch)} links to process in this run.")
+
+    for target in batch:
         target_url = target.url
         target_domain = target.domain
         retry_count = target.retry_count
-        print(f"\n[WORKER] Picked up job from queue: {target_url}")
+        
+        print(f"\n[*] Processing: {target_url}")
+        
+        # Lock the row instantly
+        update_link_status(target_url, target_domain, 'IN_PROGRESS', retry_count)
         
         raw_html_text = await scrape_dynamic_text(target_url)
         
         if not raw_html_text:
-            print("-> SKIPPED: Could not extract text from page.")
+            print("-> SKIPPED: Could not extract text from page (Likely blocked or timeout).")
             update_link_status(target_url, target_domain, "FAILED", retry_count + 1)
             continue
             
@@ -190,10 +193,14 @@ async def run_extractor_worker():
                 continue
                 
             try:
-                job = bq_client.load_table_from_json([book_dict], DESTINATION_TABLE)
-                job.result()
-                print("-> Successfully saved book to BigQuery library_database!")
-                update_link_status(target_url, target_domain, 'VISITED', retry_count)
+                # Use instant API for the final database too
+                errors = bq_client.insert_rows_json(DESTINATION_TABLE, [book_dict])
+                if errors:
+                    print(f"-> [!] BigQuery Insert Error: {errors}")
+                    update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
+                else:
+                    print("-> Successfully saved book to BigQuery library_database!")
+                    update_link_status(target_url, target_domain, 'VISITED', retry_count)
                 
             except Exception as e:
                 print(f"-> [!] Database Insert Error: {e}")
@@ -204,7 +211,7 @@ async def run_extractor_worker():
             update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
             
         except json.JSONDecodeError:
-            print("-> [!] JSON Error from Groq. Marking as FAILED in queue.")
+            print("-> [!] JSON Error from Groq. Marking as FAILED.")
             update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
 
         print("-> Pausing 2 seconds for API limits...")
