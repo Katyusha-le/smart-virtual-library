@@ -76,7 +76,7 @@ def get_batch_unvisited_links(limit=50):
     return list(bq_client.query(query).result())
 
 # ---------------------------------------------------------
-# CORE FUNCTIONS (Now with Stealth & Truncation)
+# CORE FUNCTIONS (Now with Stealth & Cloudflare bypass) 
 # ---------------------------------------------------------
 async def scrape_dynamic_text(url):
     async with async_playwright() as p:
@@ -93,7 +93,18 @@ async def scrape_dynamic_text(url):
         
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+
+            # 2. CRITICAL FIX: Wait for the Cloudflare challenge to clear
+            await page.wait_for_timeout(5000)
             
+            # 3. DIAGNOSTIC: Check if we are still trapped on a security page
+            page_title = await page.title()
+            if "Just a moment" in page_title or "Access Denied" in page_title or "Cloudflare" in page_title:
+                print(f"      [!] Trapped by Cloudflare. Bot sees: '{page_title}'")
+                await browser.close()
+                return "" # Return empty so it skips AI processing
+            
+            # 4. Scroll and expand logic
             for _ in range(3):
                 await page.mouse.wheel(0, 1500) 
                 await page.wait_for_timeout(1000) 
@@ -102,7 +113,8 @@ async def scrape_dynamic_text(url):
                 await page.wait_for_timeout(1000)
             except:
                 pass 
-                
+
+            # 5. Strip junk and extract text
             await page.evaluate("document.querySelectorAll('script, style, nav, footer, img').forEach(el => el.remove())")
             raw_text = await page.locator("body").inner_text()
             
@@ -112,7 +124,7 @@ async def scrape_dynamic_text(url):
             
         await browser.close()
         
-        # 2. REDUCED: Cut down to 15,000 chars to prevent Groq API Token crashes
+        # REDUCED: Cut down to 15,000 chars to prevent Groq API Token crashes
         return raw_text[:15000]
 
 def clean_data_with_ai(raw_text):
