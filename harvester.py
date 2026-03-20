@@ -4,6 +4,8 @@ import os
 from datetime import datetime, timezone
 from playwright.async_api import async_playwright
 from google.cloud import bigquery
+import random
+from playwright_stealth import stealth_async
 
 # 1. Authenticate with GCP
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "gcp-key.json"
@@ -26,8 +28,21 @@ async def run_discovery():
     
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(user_agent="Mozilla/5.0")
+        
+        # 1. Rotate User-Agents to look like standard desktop browsers
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        ]
+        
+        context = await browser.new_context(
+            user_agent=random.choice(user_agents),
+            viewport={'width': 1920, 'height': 1080}
+        )
         page = await context.new_page()
+        
+        # 2. Inject the Stealth plugin to hide automation fingerprints
+        await stealth_async(page)
         
         # Loop through each bookstore in the config file
         for site_name, site_data in config.items():
