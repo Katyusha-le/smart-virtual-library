@@ -146,76 +146,89 @@ def clean_data_with_ai(raw_text):
         return "{}"
 
 # ---------------------------------------------------------
-# THE WORKER LOOP (Batch Processing)
+# THE WORKER LOOP (Batch Processing + Polling)
 # ---------------------------------------------------------
 async def run_extractor_worker():
     print("==================================================")
     print("  STARTING LAYER 3: EXTRACTOR WORKER (CONSUMER) ")
     print("==================================================")
     
-    print("[WORKER] Fetching a batch of UNVISITED links...")
-    batch = get_batch_unvisited_links(limit=50)
-    
-    if not batch:
-        print("[WORKER] Queue is empty. No links found. Shutting down.")
-        return
+    max_empty_retries = 6  
+    empty_retries = 0
 
-    print(f"[WORKER] Found {len(batch)} links to process in this run.")
+    while True:
+        print(f"[WORKER] Fetching a batch of UNVISITED links... (Attempt {empty_retries+1}/{max_empty_retries+1})")
+        batch = get_batch_unvisited_links(limit=50)
+        
+        if not batch:
+            if empty_retries < max_empty_retries:
+                print("[WORKER] Queue empty. Waiting 10s for BigQuery to settle...")
+                await asyncio.sleep(10)
+                empty_retries += 1
+                continue
+            else:
+                print("[WORKER] Queue has been empty for over 60 seconds. All books processed. Shutting down.")
+                break
+                
+        # Reset the retry counter if we successfully found links
+        empty_retries = 0
+        
+        print(f"[WORKER] Found {len(batch)} links to process in this batch.")
 
-    for target in batch:
-        target_url = target.url
-        target_domain = target.domain
-        retry_count = target.retry_count
-        
-        print(f"\n[*] Processing: {target_url}")
-        
-        # Lock the row instantly
-        update_link_status(target_url, target_domain, 'IN_PROGRESS', retry_count)
-        
-        raw_html_text = await scrape_dynamic_text(target_url)
-        
-        if not raw_html_text:
-            print("-> SKIPPED: Could not extract text from page (Likely blocked or timeout).")
-            update_link_status(target_url, target_domain, "FAILED", retry_count + 1)
-            continue
+        for target in batch:
+            target_url = target.url
+            target_domain = target.domain
+            retry_count = target.retry_count
             
-        print("-> Text scraped. Sending to Llama 3.1...")
-        clean_json_str = clean_data_with_ai(raw_html_text)
-        
-        try:
-            raw_record = json.loads(clean_json_str)
-            clean_record = BookData(**raw_record)
-            book_dict = clean_record.model_dump()
+            print(f"\n[*] Processing: {target_url}")
             
-            if book_dict.get("title") is None:
-                print("-> SKIPPED: AI found no valid title. Marking as FAILED.")
-                update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
+            # Lock the row instantly
+            update_link_status(target_url, target_domain, 'IN_PROGRESS', retry_count)
+            
+            raw_html_text = await scrape_dynamic_text(target_url)
+            
+            if not raw_html_text:
+                print("-> SKIPPED: Could not extract text from page (Likely blocked or timeout).")
+                update_link_status(target_url, target_domain, "FAILED", retry_count + 1)
                 continue
                 
+            print("-> Text scraped. Sending to Llama 3.1...")
+            clean_json_str = clean_data_with_ai(raw_html_text)
+            
             try:
-                # Use instant API for the final database too
-                errors = bq_client.insert_rows_json(DESTINATION_TABLE, [book_dict])
-                if errors:
-                    print(f"-> [!] BigQuery Insert Error: {errors}")
-                    update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
-                else:
-                    print("-> Successfully saved book to BigQuery library_database!")
-                    update_link_status(target_url, target_domain, 'VISITED', retry_count)
+                raw_record = json.loads(clean_json_str)
+                clean_record = BookData(**raw_record)
+                book_dict = clean_record.model_dump()
                 
-            except Exception as e:
-                print(f"-> [!] Database Insert Error: {e}")
+                if book_dict.get("title") is None:
+                    print("-> SKIPPED: AI found no valid title. Marking as FAILED.")
+                    update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
+                    continue
+                    
+                try:
+                    # Use instant API for the final database too
+                    errors = bq_client.insert_rows_json(DESTINATION_TABLE, [book_dict])
+                    if errors:
+                        print(f"-> [!] BigQuery Insert Error: {errors}")
+                        update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
+                    else:
+                        print("-> Successfully saved book to BigQuery library_database!")
+                        update_link_status(target_url, target_domain, 'VISITED', retry_count)
+                    
+                except Exception as e:
+                    print(f"-> [!] Database Insert Error: {e}")
+                    update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
+                    
+            except ValidationError as e:
+                print(f"-> [!] Pydantic rejected the AI's data format. Marking as FAILED.")
                 update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
                 
-        except ValidationError as e:
-            print(f"-> [!] Pydantic rejected the AI's data format. Marking as FAILED.")
-            update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
-            
-        except json.JSONDecodeError:
-            print("-> [!] JSON Error from Groq. Marking as FAILED.")
-            update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
+            except json.JSONDecodeError:
+                print("-> [!] JSON Error from Groq. Marking as FAILED.")
+                update_link_status(target_url, target_domain, 'FAILED', retry_count + 1)
 
-        print("-> Pausing 2 seconds for API limits...")
-        await asyncio.sleep(2)
+            print("-> Pausing 2 seconds for API limits...")
+            await asyncio.sleep(2)
 
 if __name__ == "__main__":
     asyncio.run(run_extractor_worker())
