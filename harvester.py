@@ -39,7 +39,7 @@ async def run_discovery():
                 print(f" -> Visiting seed: {seed_url}")
                 try:
                     # 1. Wait until the network is mostly quiet, not just the HTML
-                    await page.goto(seed_url, wait_until="networkidle", timeout=60000)
+                    await page.goto(seed_url, wait_until="domcontentloaded", timeout=60000)
                     
                     # 2. Explicitly wait for the specific book selector to appear (max 15 seconds)
                     try:
