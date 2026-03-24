@@ -26,12 +26,18 @@ class UDCClassification(BaseModel):
 def get_uncategorized_books(limit=50):
     """Finds books in the clean view that aren't in the AI categories table yet."""
     query = f"""
+        WITH CleanedWithID AS (
+            SELECT 
+                CAST(FARM_FINGERPRINT(title) AS STRING) AS book_id, 
+                title, 
+                overview
+            FROM `{PROJECT_ID}.book_scraping.v_library_cleaned`
+            WHERE overview IS NOT NULL AND overview != ''
+        )
         SELECT v.book_id, v.title, v.overview
-        FROM `{PROJECT_ID}.book_scraping.v_library_cleaned` v
+        FROM CleanedWithID v
         LEFT JOIN `{CATEGORIES_TABLE}` c ON v.book_id = c.book_id
         WHERE c.book_id IS NULL 
-          AND v.overview IS NOT NULL 
-          AND v.overview != ''
         LIMIT {limit}
     """
     return list(bq_client.query(query).result())
