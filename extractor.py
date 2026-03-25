@@ -233,6 +233,9 @@ async def run_extractor_worker():
                 raw_record = json.loads(clean_json_str)
                 clean_record = BookData(**raw_record)
                 book_dict = clean_record.model_dump()
+
+                # ADDED: Stamp the exact exact time the AI finished reading it
+                book_dict["extracted_at"] = datetime.now(timezone.utc).isoformat()
                 
                 if book_dict.get("title") is None:
                     print("-> SKIPPED: AI found no valid title. Marking as FAILED.")
