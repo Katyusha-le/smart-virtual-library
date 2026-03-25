@@ -41,7 +41,8 @@ class BookData(BaseModel):
     current_price_vnd: Optional[int] = None
     overview: Optional[str] = None
     keywords: Optional[List[str]] = None
-
+    extracted_at: Optional[str] = None # ADDED: The timestamp field
+    
 # ---------------------------------------------------------
 # STATE MANAGEMENT (Free-Tier Load Job)
 # ---------------------------------------------------------
