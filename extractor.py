@@ -169,6 +169,9 @@ def clean_data_with_ai(raw_text):
     - Author/Publisher: Infer from contextual words regardless of language.
     - Dates: Look for year or date formats. Return as string.
     - Prices: Deduce original vs. current price based on context. Usually, the standard price is the higher number, and the current selling price is the lower number. Return pure integers (strip all currencies/symbols).
+    - Rating Score: Look for numbers out of 5, 10, or 100 (e.g., 4.5/5, 8.5/10). Return as a float. Return null if missing.
+    - Review Count: Look for text like "đánh giá", "nhận xét", or "reviews" next to a number. Return integer. Return 0 if missing.
+    - Bestseller: Set to true ONLY if you see badges or text explicitly stating 'Bán chạy', 'Best Seller', 'Top 10', etc.
     - If an attribute is truly missing from the page, use null.
     - Keep the 'overview' concise (maximum 3 sentences) to save space.
     
@@ -177,7 +180,8 @@ def clean_data_with_ai(raw_text):
       "title": "Book Title", "author": "Author Name", "publisher": "Publisher Name",
       "publish_date": "YYYY-MM-DD or MM/YYYY", "cover_type": "Hardcover or Paperback",
       "page_count": 300, "standard_price_vnd": 150000, "current_price_vnd": 120000,
-      "overview": "Short Summary...", "keywords": ["keyword1", "keyword2"]
+      "overview": "Short Summary...", "keywords": ["keyword1", "keyword2"],
+      "rating_score": 4.8, "review_count": 150, "is_bestseller": true
     }}
     
     Markdown text: {raw_text}
