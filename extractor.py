@@ -10,6 +10,7 @@ from groq import Groq
 from pydantic import BaseModel, ValidationError
 from typing import Optional, List
 import markdownify
+from pydantic import BaseModel, Field, field_validator
 
 # 1. Authenticate with GCP and Groq
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "gcp-key.json"
@@ -42,7 +43,24 @@ class BookData(BaseModel):
     overview: Optional[str] = None
     keywords: Optional[List[str]] = None
     extracted_at: Optional[str] = None # ADDED: The timestamp field
-    
+    # NEW DEMAND PROXIES
+    rating_score: Optional[float] = None
+    review_count: Optional[int] = 0
+    is_bestseller: Optional[bool] = False
+
+    @field_validator('rating_score')
+    @classmethod
+    def normalize_rating(cls, v):
+        if v is None:
+            return None
+        # If a site uses a 0-10 scale (e.g., scores an 8.5), divide by 2 to normalize to 5.0 max
+        if v > 5.0:
+            return round(v / 2.0, 1)
+        # If a site uses a 100 point scale (e.g., scores an 85), divide by 20
+        if v > 10.0:
+            return round(v / 20.0, 1)
+        return round(v, 1) # Preserves the 3.0 vs 3.5 precision
+
 # ---------------------------------------------------------
 # STATE MANAGEMENT (Free-Tier Load Job)
 # ---------------------------------------------------------
