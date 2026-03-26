@@ -47,11 +47,24 @@ st.markdown("Welcome to the automated market analytics dashboard.")
 with st.spinner("Fetching latest market data from BigQuery..."):
     df_catalog = load_master_catalog()
 
+# ---------------------------------------------------------
+# NEW: Smart Rating Calculations (Ignoring Zeros/Nulls)
+# ---------------------------------------------------------
+valid_ratings = df_catalog[df_catalog['rating_score'] > 0]['rating_score']
+
+if not valid_ratings.empty:
+    max_rating = round(valid_ratings.max(), 1)
+    med_rating = round(valid_ratings.median(), 1)
+    min_rating = round(valid_ratings.min(), 1)
+    rating_display = f"{max_rating} | {med_rating} | {min_rating}"
+else:
+    rating_display = "N/A"
+
 # Display high-level metrics
 col1, col2, col3 = st.columns(3)
 col1.metric("Total Books Tracked", len(df_catalog))
 col2.metric("Bestsellers Identified", int(df_catalog['is_bestseller'].sum()))
-col3.metric("Average Market Rating", round(df_catalog['rating_score'].mean(), 1) if not df_catalog.empty else 0)
+col3.metric("Rating (Max | Med | Min)", rating_display)
 
 # Display the raw data table
 st.subheader("Master Market Catalog")
