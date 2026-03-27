@@ -7,10 +7,9 @@ from playwright.async_api import async_playwright
 from playwright_stealth import stealth_async
 from google.cloud import bigquery
 from groq import Groq
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, Field, field_validator
 from typing import Optional, List
 import markdownify
-from pydantic import BaseModel, Field, field_validator
 
 # 1. Authenticate with GCP and Groq
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "gcp-key.json"
