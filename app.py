@@ -43,17 +43,26 @@ def load_price_history(selected_titles):
     bq_client = get_bq_client()
     PROJECT_ID = bq_client.project
     
-    # Format the list of titles for SQL syntax
-    formatted_titles = ", ".join([f"'{title.replace('\'', '\\\'')}'" for title in selected_titles])
-    
-    # Query the RAW table to get the timeline of price changes
+    # CHANGED: We use standard SQL parameters instead of string hacking
     query = f"""
         SELECT title, current_price_vnd, extracted_at
         FROM `{PROJECT_ID}.book_scraping.library_database`
-        WHERE title IN ({formatted_titles})
+        WHERE title IN UNNEST(@selected_titles)
         ORDER BY extracted_at ASC
     """
-    return bq_client.query(query).to_dataframe()
+    
+    # Configure the query to safely pass the Python list directly into BigQuery
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("selected_titles", "STRING", selected_titles)
+        ]
+    )
+    
+    try:
+        return bq_client.query(query, job_config=job_config).to_dataframe()
+    except BadRequest as e:
+        st.error(f"🚨 Line Chart SQL Error: {e.message}")
+        return pd.DataFrame()
 
 # ---------------------------------------------------------
 # UI & DATA LOADING
