@@ -42,13 +42,19 @@ The project encompasses an end-to-end data lifecycle, from raw web discovery to 
 * Uses a dedicated Groq prompt (`llama-3.1-8b-instant`) to act as an expert Head Librarian.
 * Analyzes book overviews and assigns the single most accurate Top-Level Universal Decimal Classification (UDC) code (e.g., "8 - Literature", "5 - Natural Sciences").
 
+![Virtual Library Dashboard](dashboard/categorizer.png)
+
 ### 5. Hybrid Trend Analyzer
 * Queries BigQuery for macro-level category gaps and micro-level book priorities (based on bestseller status and review counts).
 * Uses a heavy-weight reasoning model (`llama-3.3-70b-versatile`) to synthesize this data into specific "Micro-Trends".
 * Generates a structured JSON response containing the top 3 high-priority acquisition targets and the strategic reasoning behind the recommendations.
+
+![Virtual Library Dashboard](dashboard/trendanalyzer.png)
 
 ### 6. Interactive Intelligence Dashboard
 * **Built with Streamlit:** A responsive web application (`app.py`) serving as the primary user interface.
 * **Live BigQuery Connection:** Caches and loads the master catalog directly from the Google Cloud data warehouse.
 * **Dynamic Filtering:** Allows granular searches by Category, Author, Publisher, Price Range, and Bestseller status.
 * **Plotly Visualizations:** Features interactive pie charts for market proportions and line graphs for tracking historical book prices across multiple scrape dates.
+
+![Virtual Library Dashboard](dashboard/pricehistory.png)
