@@ -1,4 +1,4 @@
-# Smart Virtual Library
+# Smart Virtual Library / Automated Price Scraper for Library's Book Procurement
 
 [![Virtual Library Dashboard](dashboard/dashboard.png)](https://smart-virtual-library-krcunpvgcpgqrwa5xbd3bd.streamlit.app/)
 
