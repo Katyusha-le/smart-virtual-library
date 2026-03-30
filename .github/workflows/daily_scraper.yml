@@ -2,10 +2,10 @@ name: Virtual Library ETL Pipeline
 
 on:
   schedule:
-    # In production, they are scheduled 30 mins apart to ensure the queue is full
+    # Scheduled 30 mins apart to ensure the queue is full
     - cron: '0 1 * * *'   # Harvester runs at 1:00 AM
     - cron: '30 1 * * *'  # Extractor runs at 1:30 AM
-    - cron: '0 2 * * *'   # Uncomment this line if you want the Categorizer to auto-run at 2:00 AM
+    - cron: '0 2 * * *'   # Categorizer runs at 2:00 AM
   workflow_dispatch:      
 
 jobs:
@@ -13,10 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4 # UPDATED TO CLEAR WARNING
+        uses: actions/checkout@v4 
 
       - name: Setup Python
-        uses: actions/setup-python@v5 # UPDATED TO CLEAR WARNING
+        uses: actions/setup-python@v5 
         with:
           python-version: '3.10'
 
@@ -33,14 +33,13 @@ jobs:
         run: python harvester.py
         
   run-extractor:
-    # THE "NEEDS" LINE HAS BEEN REMOVED FOR PARALLEL EXECUTION
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4 # UPDATED TO CLEAR WARNING
+        uses: actions/checkout@v4 
 
       - name: Setup Python
-        uses: actions/setup-python@v5 # UPDATED TO CLEAR WARNING
+        uses: actions/setup-python@v5 
         with:
           python-version: '3.10'
 
@@ -81,7 +80,7 @@ jobs:
         run: python categorizer.py
 
   # ---------------------------------------------------------
-  # NEW: PHASE 4 - HYBRID TREND ANALYZER
+  # HYBRID TREND ANALYZER
   # ---------------------------------------------------------
   run-trend-analyzer:
     runs-on: ubuntu-latest
