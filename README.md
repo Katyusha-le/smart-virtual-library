@@ -1,6 +1,6 @@
 # Smart Virtual Library
 
-[![Virtual Library Dashboard](dashboard.png)](https://smart-virtual-library-krcunpvgcpgqrwa5xbd3bd.streamlit.app/)
+[![Virtual Library Dashboard](<img width="1920" height="794" alt="dashboard" src="https://github.com/user-attachments/assets/aad3e01e-50bf-4def-950d-e32beaf15b64" />)](https://smart-virtual-library-krcunpvgcpgqrwa5xbd3bd.streamlit.app/)
 
 > 👆 **Click the image above to view the live interactive dashboard!**
 
