@@ -64,3 +64,5 @@ The dashboard is not just a read-only reporting tool; it is a fully interactive,
 * **Interactive Inventory Management:** Users can check or uncheck a "Buy" box directly inside the Streamlit data table to mark books as acquired or returned.
 * **Free-Tier Optimized Writes:** To bypass BigQuery's strict DML (Data Manipulation Language) pricing blocks, the application uses an Append-Only Ledger (Event Sourcing). Instead of deleting or updating rows, the system securely appends timestamped BUY or RETURN actions, creating a fully auditable financial paper trail at zero cost.
 * **Auto-Syncing AI:** The moment a book is checked out in the UI, the BigQuery views update instantly. The 70B AI Strategist reads this ledger and autonomously drops acquired books from its future Daily Recommendation Reports.
+
+![Virtual Library Dashboard](dashboard/acquisitioncheckout.png)
