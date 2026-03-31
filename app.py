@@ -81,23 +81,45 @@ def load_ai_insights():
         # Fails silently and returns empty if the table doesn't exist yet
         return pd.DataFrame()
 
-def mark_books_as_purchased(selected_titles):
-    """Appends purchased books to the BigQuery ledger using a Free-Tier friendly Load Job."""
+# Fetch currently owned books from the ledger
+@st.cache_data(ttl=3600)
+def load_purchased_ledger():
+    bq_client = get_bq_client()
+    PROJECT_ID = bq_client.project
+    query = f"""
+        SELECT title
+        FROM (
+            SELECT title, action, ROW_NUMBER() OVER(PARTITION BY title ORDER BY action_at DESC) as rn
+            FROM `{PROJECT_ID}.book_scraping.purchased_books`
+        )
+        WHERE rn = 1 AND action = 'BUY'
+    """
+    try:
+        df = bq_client.query(query).to_dataframe()
+        return df['title'].tolist()
+    except Exception:
+        return []
+
+# Free-tier friendly append with Action tags and Python Timestamps
+def log_ledger_actions(action_records):
+    if not action_records:
+        return True
     bq_client = get_bq_client()
     PROJECT_ID = bq_client.project
     table_id = f"{PROJECT_ID}.book_scraping.purchased_books"
     
-    # Format data for BigQuery JSON insertion
-    rows_to_insert = [{"title": title} for title in selected_titles]
+    current_time = datetime.now(timezone.utc).isoformat()
+    rows_to_insert = [
+        {"title": rec["title"], "action": rec["action"], "action_at": current_time} 
+        for rec in action_records
+    ]
     
-    # Use a Load Job (Append) instead of DML (Insert) to bypass free-tier limits
     job_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
     )
     
     try:
-        # .result() tells Python to wait until the append is completely finished
         job = bq_client.load_table_from_json(rows_to_insert, table_id, job_config=job_config)
         job.result() 
         return True
@@ -114,6 +136,7 @@ st.markdown("Welcome to the automated market analytics dashboard.")
 with st.spinner("Fetching latest market data from BigQuery..."):
     df_catalog = load_master_catalog()
     df_insights = load_ai_insights()
+    owned_books = load_purchased_ledger()
 
 # ---------------------------------------------------------
 # SIDEBAR FILTERS (Granular Search)
@@ -270,16 +293,27 @@ edited_df = st.data_editor(
     use_container_width=True
 )
     
-# Check if the user has ticked any boxes
-books_to_buy = edited_df[edited_df["Buy"] == True]["title"].tolist()
+# The Delta Logic: What did the user change?
+visible_titles = edited_df['title'].tolist()
+current_checked = edited_df[edited_df["Buy"] == True]["title"].tolist()
+
+new_buys = [t for t in current_checked if t not in owned_books]
+new_returns = [t for t in visible_titles if t in owned_books and t not in current_checked]
+
+# Reveal the button only if changes were made
+if len(new_buys) > 0 or len(new_returns) > 0:
+    action_summary = []
+    if new_buys: action_summary.append(f"BUY {len(new_buys)}")
+    if new_returns: action_summary.append(f"RETURN {len(new_returns)}")
     
-# If boxes are checked, reveal the checkout button
-if len(books_to_buy) > 0:
-    if st.button(f"✅ Confirm Purchase of {len(books_to_buy)} Book(s)", type="primary"):
-        with st.spinner("Recording to BigQuery ledger..."):
-            success = mark_books_as_purchased(books_to_buy)
+    if st.button(f"✅ Confirm Changes ({' & '.join(action_summary)})", type="primary"):
+        with st.spinner("Recording actions to BigQuery ledger..."):
+            action_records = [{"title": t, "action": "BUY"} for t in new_buys] + \
+                             [{"title": t, "action": "RETURN"} for t in new_returns]
+            
+            success = log_ledger_actions(action_records)
             if success:
-                st.success("Successfully recorded! The AI will now ignore these books.")
+                st.success("Successfully recorded! Ledger updated.")
                 st.balloons()
-                st.cache_data.clear() # Clear the cache
-                st.rerun() # Refresh the page instantly to remove them from the screen
+                st.cache_data.clear() 
+                st.rerun()
