@@ -81,6 +81,23 @@ def load_ai_insights():
         # Fails silently and returns empty if the table doesn't exist yet
         return pd.DataFrame()
 
+def mark_books_as_purchased(selected_titles):
+    """Inserts purchased books into the BigQuery ledger."""
+    bq_client = get_bq_client()
+    PROJECT_ID = bq_client.project
+    table_id = f"{PROJECT_ID}.book_scraping.purchased_books"
+    
+    # Format data for BigQuery JSON insertion
+    rows_to_insert = [{"title": title} for title in selected_titles]
+    
+    # Insert the rows
+    errors = bq_client.insert_rows_json(table_id, rows_to_insert)
+    if not errors:
+        return True
+    else:
+        st.error(f"Failed to insert: {errors}")
+        return False
+
 # ---------------------------------------------------------
 # UI & DATA LOADING
 # ---------------------------------------------------------
@@ -172,6 +189,29 @@ else:
 
 st.divider()
 
+# ---------------------------------------------------------
+# ACQUISITION CHECKOUT WORKFLOW
+# ---------------------------------------------------------
+st.subheader("🛒 Acquisition Checkout")
+st.markdown("Did you buy one of the recommended books? Mark it off here so the AI knows to stop recommending it.")
+
+# Dropdown to select books to checkout
+purchased_selection = st.multiselect(
+    "Select acquired books:", 
+    options=filtered_df['title'].dropna().unique()
+)
+
+if st.button("✅ Mark as Purchased", type="primary"):
+    if purchased_selection:
+        with st.spinner("Recording purchase to the ledger..."):
+            success = mark_books_as_purchased(purchased_selection)
+            if success:
+                st.success(f"Successfully recorded {len(purchased_selection)} books into the ledger!")
+                st.balloons()
+                # Clear the cache so the dashboard knows the database changed
+                st.cache_data.clear() 
+    else:
+        st.warning("Please select at least one book from the dropdown before clicking.")
 # ---------------------------------------------------------
 # VISUALIZATIONS
 # ---------------------------------------------------------
