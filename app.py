@@ -82,20 +82,29 @@ def load_ai_insights():
         return pd.DataFrame()
 
 def mark_books_as_purchased(selected_titles):
-    """Inserts purchased books into the BigQuery ledger."""
+    """Inserts purchased books into the BigQuery ledger using standard SQL."""
     bq_client = get_bq_client()
     PROJECT_ID = bq_client.project
-    table_id = f"{PROJECT_ID}.book_scraping.purchased_books"
     
-    # Format data for BigQuery JSON insertion
-    rows_to_insert = [{"title": title} for title in selected_titles]
+    # Use a standard INSERT statement combined with UNNEST to handle multiple books at once
+    query = f"""
+        INSERT INTO `{PROJECT_ID}.book_scraping.purchased_books` (title)
+        SELECT title FROM UNNEST(@selected_titles) AS title
+    """
     
-    # Insert the rows
-    errors = bq_client.insert_rows_json(table_id, rows_to_insert)
-    if not errors:
+    # Securely pass the python list into the SQL query
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("selected_titles", "STRING", selected_titles)
+        ]
+    )
+    
+    try:
+        # .result() tells Python to wait until the insert is completely finished
+        bq_client.query(query, job_config=job_config).result() 
         return True
-    else:
-        st.error(f"Failed to insert: {errors}")
+    except Exception as e:
+        st.error(f"🚨 Database Write Error: {e}")
         return False
 
 # ---------------------------------------------------------
