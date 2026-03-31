@@ -43,12 +43,17 @@ def get_macro_gaps():
 
 # 4. Fetch Micro Data (Book Level)
 def get_micro_gaps():
-    """Fetches the top 50 highest-priority missing books based on Bestsellers, Reviews, and Freshness."""
+    """Fetches the top 50 highest-priority missing books, IGNORING actively purchased books."""
     query = f"""
         SELECT title, author_name, category, publish_date, rating_score, review_count, is_bestseller
         FROM `{PROJECT_ID}.book_scraping.v_gap_book_level`
-        -- NEW: Ignore books that are already in the purchased ledger
-        WHERE title NOT IN (SELECT title FROM `{PROJECT_ID}.book_scraping.purchased_books`)
+        WHERE title NOT IN (
+            -- This inner query finds the most recent action (BUY or RETURN) for every book
+            SELECT title FROM (
+                SELECT title, action, ROW_NUMBER() OVER(PARTITION BY title ORDER BY action_at DESC) as rn
+                FROM `{PROJECT_ID}.book_scraping.purchased_books`
+            ) WHERE rn = 1 AND action = 'BUY'
+        )
         LIMIT 50
     """
     results = bq_client.query(query).result()
