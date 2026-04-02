@@ -93,14 +93,14 @@ graph TD
     %% Define BigQuery Views (Yellow - Semantic Layer)
     CleanView[[v_library_cleaned]]
     MasterView[[v_library_master_catalog]]
-    GapViews[[v_gap_book/category_level]]
+    GapViews[[v_gap_book or category_level]]
 
     %% Core Data Extraction Flow
     Web -- 1. Scans URLs --> Harvester
     Harvester -- Saves Links --> Frontier
     Extractor -- Fetches UNVISITED --> Frontier
     Web -- 2. Scrapes HTML --> Extractor
-    Extractor -- Parses & Validates --> RawDB
+    Extractor -- Parses and Validates --> RawDB
 
     %% Transformation & Categorization Flow
     RawDB -- Deduplicates --> CleanView
@@ -108,7 +108,8 @@ graph TD
     Categorizer -- UDC Codes --> CatDB
 
     %% Modeling & Analytics Flow
-    RawDB & CatDB -- Fact/Dim Joins --> MasterView
+    RawDB -- Fact and Dim Joins --> MasterView
+    CatDB -- Fact and Dim Joins --> MasterView
     MasterView -- Calculates Gaps --> GapViews
 
     %% AI Strategy Flow
@@ -120,7 +121,7 @@ graph TD
     MasterView -. Filterable Catalog .-> Dashboard
     RawDB -. Historical Prices .-> Dashboard
     Insights -. AI Strategy Report .-> Dashboard
-    Dashboard -- Appends BUY/RETURN --> Ledger
+    Dashboard -- Appends BUY or RETURN --> Ledger
     
     %% Styling
     style Dashboard fill:#ff4b4b,stroke:#fff,stroke-width:2px,color:#fff
